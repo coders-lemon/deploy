@@ -1,0 +1,163 @@
+######################################################################
+# Go specific
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+deploy
+deploy.exe
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Module download cache
+go/pkg/mod/
+
+go.sum
+
+######################################################################
+# Build and Deploy artifacts
+
+# Build output directories
+/build/
+/dist/
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# Gradle
+.gradle
+!gradle/wrapper/gradle-wrapper.jar
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# Deploy tool artifacts
+*.jar
+*.tar.gz
+*.zip
+*.war
+
+# Log files
+logs/
+*.log
+
+######################################################################
+# Configuration files (may contain sensitive data)
+
+# Deploy configuration files
+deploy.yaml
+deploy.yml
+*.env
+.env*
+bootstrap-dev-yc.yml
+
+######################################################################
+# IDE and Editor files
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.metadata/
+
+### VS Code ###
+.vscode/
+
+### JRebel ###
+rebel.xml
+
+### NetBeans ###
+nbproject/private/
+build/*
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+
+######################################################################
+# OS generated files
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+######################################################################
+# Test and Development
+
+# Test projects created by the tool
+test-*/
+test-npm/
+test-maven/
+test-gradle/
+example-*/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.xml.versionsBackup
+
+# Coverage reports
+coverage.txt
+coverage.html
+coverage.out
+
+# Profiling data
+*.prof
+
+######################################################################
+# Others
+
+# Cursor AI
+# .cursor/
+
+# Local development
+local/
+.local/
+
+# Documentation build
+docs/_build/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Package files
+*.deb
+*.rpm

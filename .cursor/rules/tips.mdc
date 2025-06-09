@@ -1,0 +1,406 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Go 命令行部署工具开发 - NPM & Java 专用版 (支持自定义脚本)
+
+## 项目概述
+开发一个名为 `deploy` 的 Go 命令行工具，专门用于 NPM (Node.js) 和 Java 项目的本地打包和线上部署，支持自定义部署脚本和默认启动命令。
+
+## 核心功能需求
+1. **NPM 项目支持**：自动识别 package.json，执行 npm build，处理 dist 目录
+2. **Java 项目支持**：支持 Maven/Gradle 构建，处理 JAR/WAR 包
+3. **自定义脚本支持**：允许指定自定义部署脚本，支持脚本参数传递
+4. **默认启动命令**：未指定脚本时使用默认的服务启动/重启命令
+5. **脚本执行管理**：支持脚本执行前后的钩子函数
+6. **智能项目识别**：自动检测项目类型和部署方式
+
+## 技术栈要求
+- **语言**：Go 1.21+
+- **CLI框架**：cobra 库构建命令行界面
+- **配置管理**：viper 库处理 YAML 配置
+- **SSH连接**：golang.org/x/crypto/ssh 处理远程连接
+- **脚本执行**：支持 shell 脚本远程执行
+- **模板引擎**：支持脚本参数模板替换
+
+## 项目结构
+```
+deploy/
+├── cmd/                    # 命令行入口
+│   ├── root.go            # 根命令
+│   ├── init.go            # 初始化配置
+│   ├── build.go           # 构建命令
+│   ├── deploy.go          # 部署命令
+│   ├── script.go          # 脚本管理命令
+│   ├── status.go          # 状态查询
+│   └── rollback.go        # 版本回滚
+├── internal/              # 内部实现
+│   ├── builder/           # 构建器
+│   │   ├── npm.go         # NPM 构建器
+│   │   ├── maven.go       # Maven 构建器
+│   │   └── gradle.go      # Gradle 构建器
+│   ├── deployer/          # 部署器
+│   │   ├── ssh.go         # SSH 连接管理
+│   │   ├── transfer.go    # 文件传输
+│   │   ├── script.go      # 脚本执行器
+│   │   └── service.go     # 默认服务管理
+│   ├── detector/          # 项目类型检测
+│   ├── template/          # 脚本模板引擎
+│   ├── config/            # 配置管理
+│   └── utils/             # 工具函数
+├── pkg/                   # 公共包
+├── configs/               # 配置模板
+├── scripts/               # 默认脚本模板
+│   ├── npm-deploy.sh      # NPM 默认部署脚本
+│   ├── java-deploy.sh     # Java 默认部署脚本
+│   └── common.sh          # 通用函数库
+├── go.mod
+├── go.sum
+└── README.md
+```
+
+## 命令行接口设计
+```bash
+# 初始化和配置
+deploy init                              # 生成配置文件模板
+deploy init --with-scripts               # 生成配置文件和示例脚本
+deploy config show                       # 显示当前配置
+deploy detect                           # 检测项目类型
+
+# 脚本管理
+deploy script list                       # 列出可用脚本
+deploy script validate                   # 验证脚本语法
+deploy script test --env=dev             # 测试脚本执行
+
+# 构建命令
+deploy build                            # 自动检测并构建
+deploy build --type=npm                 # 指定构建 NPM 项目
+deploy build --type=maven               # 指定构建 Maven 项目
+
+# 部署命令
+deploy push                             # 使用默认脚本部署
+deploy push --script=custom-deploy.sh   # 使用自定义脚本部署
+deploy push --env=prod --no-script      # 仅使用默认启动命令
+deploy push --script-args="--force --backup" # 传递脚本参数
+
+# 管理命令
+deploy status                           # 查看所有环境状态
+deploy rollback                         # 回滚到上一版本
+deploy logs --script                    # 查看脚本执行日志
+```
+
+## 配置文件格式 (deploy.yaml)
+```yaml
+project:
+  name: "my-app"
+  type: "auto"  # auto, npm, maven, gradle
+
+# NPM 项目配置
+npm:
+  build_command: "npm run build"
+  build_dir: "dist"
+  install_command: "npm ci"
+  node_version: "18"
+  # 默认启动命令
+  default_start_command: "pm2 restart ecosystem.config.js"
+  default_stop_command: "pm2 stop my-app"
+
+# Java 项目配置  
+java:
+  build_tool: "maven"  # maven, gradle
+  build_command: "mvn clean package -DskipTests"
+  artifact_path: "target/*.jar"
+  java_version: "11"
+  
+  # Java 运行时配置
+  runtime:
+    # JVM 堆内存配置 (根据环境自动调整)
+    heap_size:
+      min: "512m"      # 最小堆大小 -Xms
+      max: "2g"        # 最大堆大小 -Xmx
+    
+    # 其他 JVM 参数
+    jvm_options:
+      - "-XX:+UseG1GC"                    # 使用 G1 垃圾收集器
+      - "-XX:+HeapDumpOnOutOfMemoryError" # OOM 时生成堆转储
+      - "-XX:HeapDumpPath=/opt/app/logs"  # 堆转储文件路径
+      - "-Dfile.encoding=UTF-8"           # 文件编码
+      - "-Duser.timezone=Asia/Shanghai"   # 时区设置
+    
+    # 应用参数
+    app_options:
+      - "--server.port=8080"              # 应用端口
+      - "--spring.profiles.active=prod"   # Spring 配置文件
+    
+  # 默认启动/停止命令模板
+  default_start_command: "nohup java -Xms{{.HeapMin}} -Xmx{{.HeapMax}} {{.JvmOptions}} -jar {{.JarFile}} {{.AppOptions}} > {{.LogFile}} 2>&1 & echo $! > {{.PidFile}}"
+  default_stop_command: "kill -TERM $(cat {{.PidFile}}) && rm -f {{.PidFile}}"
+  default_status_command: "ps -p $(cat {{.PidFile}} 2>/dev/null) > /dev/null 2>&1"
+
+# 脚本配置
+scripts:
+  # 全局脚本配置
+  global:
+    timeout: 300                    # 脚本执行超时
+    shell: "/bin/bash"              # 执行 shell
+    working_dir: "/opt/app"         # 工作目录
+    
+  # 自定义脚本路径
+  custom:
+    deploy: "./scripts/deploy.sh"           # 部署脚本
+    rollback: "./scripts/rollback.sh"       # 回滚脚本
+    health_check: "./scripts/health.sh"     # 健康检查脚本
+    
+  # 脚本钩子
+  hooks:
+    pre_deploy: "./scripts/pre-deploy.sh"   # 部署前执行
+    post_deploy: "./scripts/post-deploy.sh" # 部署后执行
+    pre_rollback: "./scripts/pre-rollback.sh"
+    post_rollback: "./scripts/post-rollback.sh"
+
+# 环境配置
+environments:
+  dev:
+    servers:
+      - host: "dev.example.com"
+        user: "deploy"
+        port: 22
+        key_file: "~/.ssh/id_rsa"
+    deploy_path: "/opt/app"
+    service_name: "my-app"
+    service_port: 8080
+    
+    # 开发环境 Java 配置覆盖
+    java:
+      runtime:
+        heap_size:
+          min: "256m"    # 开发环境较小内存
+          max: "1g"
+        jvm_options:
+          - "-XX:+UseG1GC"
+          - "-Xdebug"    # 开启调试
+          - "-Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"
+        app_options:
+          - "--server.port=8080"
+          - "--spring.profiles.active=dev"
+          - "--logging.level.com.example=DEBUG"
+    
+  test:
+    servers:
+      - host: "test.example.com"
+        user: "deploy"
+        port: 22
+    deploy_path: "/opt/app"
+    service_name: "my-app"
+    service_port: 8080
+    
+    # 测试环境 Java 配置
+    java:
+      runtime:
+        heap_size:
+          min: "512m"
+          max: "1g"
+        app_options:
+          - "--server.port=8080"
+          - "--spring.profiles.active=test"
+          
+  prod:
+    servers:
+      - host: "prod1.example.com"
+        user: "deploy"
+        port: 22
+      - host: "prod2.example.com"
+        user: "deploy"
+        port: 22
+    deploy_path: "/opt/app"
+    service_name: "my-app"
+    service_port: 8080
+    health_check_url: "http://localhost:8080/actuator/health"
+    
+    # 生产环境 Java 配置
+    java:
+      runtime:
+        heap_size:
+          min: "2g"      # 生产环境大内存
+          max: "4g"
+        jvm_options:
+          - "-XX:+UseG1GC"
+          - "-XX:+HeapDumpOnOutOfMemoryError"
+          - "-XX:HeapDumpPath=/opt/app/logs"
+          - "-XX:+PrintGCDetails"
+          - "-XX:+PrintGCTimeStamps"
+          - "-Xloggc:/opt/app/logs/gc.log"
+          - "-Dfile.encoding=UTF-8"
+          - "-Duser.timezone=Asia/Shanghai"
+        app_options:
+          - "--server.port=8080"
+          - "--spring.profiles.active=prod"
+          - "--logging.file.path=/opt/app/logs"
+
+# 部署配置
+deploy:
+  backup_count: 5           # 保留备份数量
+  timeout: 300              # 部署超时时间
+  restart_delay: 10         # 服务重启延迟
+  health_check_timeout: 60  # 健康检查超时
+  use_scripts: true         # 是否优先使用脚本
+  fallback_to_default: true # 脚本失败时是否回退到默认命令
+```
+
+## 脚本执行逻辑
+
+### 1. 脚本优先级
+```go
+1. 命令行指定的脚本 (--script)
+2. 环境特定脚本 (environments.{env}.scripts.deploy)
+3. 全局自定义脚本 (scripts.custom.deploy)
+4. 默认启动命令 (npm.default_start_command 或 java.default_start_command)
+```
+
+### 2. 脚本模板变量
+```bash
+# 脚本中可用的模板变量
+{{.ProjectName}}     # 项目名称
+{{.Environment}}     # 当前环境
+{{.Version}}         # 部署版本
+{{.DeployPath}}      # 部署路径
+{{.ServiceName}}     # 服务名称
+{{.ServicePort}}     # 服务端口
+{{.ArtifactPath}}    # 构建产物路径
+{{.BackupPath}}      # 备份路径
+{{.Timestamp}}       # 时间戳
+
+# 自定义变量 (来自配置文件)
+{{.Variables.APP_ENV}}
+{{.Variables.LOG_LEVEL}}
+```
+
+### 3. 示例部署脚本模板
+```bash
+#!/bin/bash
+# NPM 项目部署脚本示例
+
+set -e
+
+PROJECT_NAME="{{.ProjectName}}"
+DEPLOY_PATH="{{.DeployPath}}"
+SERVICE_NAME="{{.ServiceName}}"
+VERSION="{{.Version}}"
+APP_ENV="{{.Variables.APP_ENV}}"
+
+echo "开始部署 $PROJECT_NAME 到 $APP_ENV 环境..."
+
+# 创建备份
+if [ -d "$DEPLOY_PATH/current" ]; then
+    echo "创建备份..."
+    cp -r "$DEPLOY_PATH/current" "$DEPLOY_PATH/backup-$(date +%Y%m%d-%H%M%S)"
+fi
+
+# 停止服务
+echo "停止服务..."
+pm2 stop $SERVICE_NAME || true
+
+# 部署新版本
+echo "部署新版本 $VERSION..."
+rm -rf "$DEPLOY_PATH/current"
+mkdir -p "$DEPLOY_PATH/current"
+tar -xzf "/tmp/deploy-$VERSION.tar.gz" -C "$DEPLOY_PATH/current"
+
+# 安装依赖
+cd "$DEPLOY_PATH/current"
+npm ci --production
+
+# 启动服务
+echo "启动服务..."
+pm2 start ecosystem.config.js
+
+# 健康检查
+echo "执行健康检查..."
+sleep 5
+curl -f http://localhost:{{.ServicePort}}/health || exit 1
+
+echo "部署完成！"
+```
+
+## 核心功能实现要点
+
+### 1. 脚本执行器
+```go
+type ScriptExecutor struct {
+    SSH        *ssh.Client
+    Config     *Config
+    Variables  map[string]string
+}
+
+func (s *ScriptExecutor) Execute(scriptPath string, args []string) error {
+    // 1. 读取脚本内容
+    // 2. 模板变量替换
+    // 3. 上传到远程服务器
+    // 4. 设置执行权限
+    // 5. 执行脚本
+    // 6. 实时输出日志
+    // 7. 检查执行结果
+}
+```
+
+### 2. 默认命令执行器
+```go
+type DefaultCommandExecutor struct {
+    SSH    *ssh.Client
+    Config *Config
+}
+
+func (d *DefaultCommandExecutor) ExecuteStartCommand() error {
+    // 根据项目类型执行默认启动命令
+}
+
+func (d *DefaultCommandExecutor) ExecuteStopCommand() error {
+    // 根据项目类型执行默认停止命令
+}
+```
+
+### 3. 部署流程控制
+```go
+func (d *Deployer) Deploy() error {
+    // 1. 执行 pre_deploy 钩子
+    // 2. 传输文件
+    // 3. 选择执行方式：
+    //    - 有自定义脚本 -> 执行脚本
+    //    - 无自定义脚本 -> 执行默认命令
+    // 4. 健康检查
+    // 5. 执行 post_deploy 钩子
+    // 6. 清理临时文件
+}
+```
+
+### 4. 脚本验证
+```go
+func ValidateScript(scriptPath string) error {
+    // 1. 检查脚本文件存在性
+    // 2. 检查脚本语法 (bash -n)
+    // 3. 检查必要的模板变量
+    // 4. 检查脚本权限
+}
+```
+
+## 错误处理和回退机制
+- 脚本执行失败时的详细错误信息
+- 支持脚本执行失败后回退到默认命令
+- 部署失败时自动回滚到上一版本
+- 脚本超时处理和强制终止
+
+## 开发优先级
+1. 基础 CLI 框架和配置管理
+2. 脚本模板引擎和变量替换
+3. 脚本执行器和 SSH 管理
+4. 默认命令执行器
+5. 部署流程控制和钩子系统
+6. 错误处理和回退机制
+7. 脚本验证和测试功能
+
+## 测试策略
+- 单元测试：各个构建器和部署器
+- 集成测试：完整的构建部署流程
+- 模拟测试：SSH 连接和文件传输
+- 真实环境测试：实际项目部署验证
